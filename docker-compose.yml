@@ -1,0 +1,71 @@
+name: aegis-rag-opsflow
+
+services:
+  mysql:
+    image: mysql:8.0
+    restart: unless-stopped
+    environment:
+      MYSQL_DATABASE: aegis_rag
+      MYSQL_USER: aegis
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-aegis_pass}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-aegis_root_dev_pass}
+      TZ: UTC
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --default-time-zone=+00:00
+    ports:
+      - "127.0.0.1:3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "MYSQL_PWD=$$MYSQL_PASSWORD mysql -h 127.0.0.1 -u $$MYSQL_USER -D $$MYSQL_DATABASE -e 'SELECT 1' >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+    stop_grace_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--appendfsync", "everysec"]
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 5s
+    stop_grace_period: 30s
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:6333:6333"
+      - "127.0.0.1:6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
+      - qdrant_snapshots:/qdrant/snapshots
+    # 官方镜像没有 curl；使用 Bash 内建 TCP 和 HTTP 状态码完成就绪探测。
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - 'exec 3<>/dev/tcp/127.0.0.1/6333; printf "GET /readyz HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n" >&3; read -r status <&3; [[ "$$status" == "HTTP/1.1 200"* ]]'
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    stop_grace_period: 30s
+
+volumes:
+  mysql_data:
+  redis_data:
+  qdrant_data:
+  qdrant_snapshots:
